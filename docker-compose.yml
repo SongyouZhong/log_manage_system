@@ -1,0 +1,84 @@
+version: '3.8'
+
+networks:
+  logging:
+    driver: bridge
+
+volumes:
+  loki-data:
+  grafana-data:
+
+services:
+  # OpenTelemetry Collector - 接收和处理遥测数据
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "14250:14250" # Jaeger gRPC receiver
+      - "14268:14268" # Jaeger HTTP receiver
+      - "9411:9411"   # Zipkin receiver
+      - "13133:13133" # Health check
+      - "8888:8888"   # Metrics endpoint
+      - "55679:55679" # zpages extension
+    volumes:
+      - ./config/otel-collector/otel-collector-config.yaml:/etc/otelcol-contrib/otel-collector-config.yaml
+    command: ["--config=/etc/otelcol-contrib/otel-collector-config.yaml"]
+    networks:
+      - logging
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  # Loki - 日志聚合系统
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: loki
+    ports:
+      - "3101:3100"
+    volumes:
+      - loki-data:/loki
+      - ./config/loki/loki-config.yml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - logging
+    restart: unless-stopped
+
+  # Promtail - 日志收集器
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: promtail
+    volumes:
+      - ./config/promtail/promtail-config.yml:/etc/promtail/config.yml
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/songyou/meiyue/backend-aichemol/logs:/app/logs:ro  # 修正路径
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - logging
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  # Grafana - 可视化界面
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: grafana
+    ports:
+      - "3100:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./config/grafana/dashboard-configs:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    networks:
+      - logging
+    depends_on:
+      - loki
+    restart: unless-stopped

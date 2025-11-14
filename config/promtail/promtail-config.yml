@@ -1,0 +1,156 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # 收集Docker容器日志
+  - job_name: containers
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: containerlogs
+          __path__: /var/lib/docker/containers/*/*log
+
+    pipeline_stages:
+      - json:
+          expressions:
+            output: log
+            stream: stream
+            attrs:
+      - json:
+          expressions:
+            tag:
+          source: attrs
+      - regex:
+          expression: (?P<container_name>(?:[^|]*))\|
+          source: tag
+      - timestamp:
+          format: RFC3339Nano
+          source: time
+      - labels:
+          stream:
+          container_name:
+      - output:
+          source: output
+
+  # 收集FastAPI应用日志（结构化日志）- 修正版本
+  - job_name: aichemol_backend
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: aichemol-backend
+          service: aichemol-backend
+          __path__: /app/logs/*.log
+
+    pipeline_stages:
+      # 解析JSON格式日志
+      - json:
+          expressions:
+            timestamp: asctime
+            level: levelname
+            message: message
+            trace_id: otelTraceID
+            span_id: otelSpanID
+            service_name: otelServiceName
+            logger_name: name
+            filename: filename
+            lineno: lineno
+            funcname: funcName
+      # 设置时间戳 - 指定时区为 Asia/Shanghai
+      - timestamp:
+          format: '2006-01-02 15:04:05,000'
+          source: timestamp
+          location: 'Asia/Shanghai'
+      # 添加标签
+      - labels:
+          level:
+          service_name:
+          logger_name:
+      # 确保服务名标签正确
+      - template:
+          source: service_name_final
+          template: '{{ or .service_name "aichemol-backend" }}'
+      - labels:
+          service_name: service_name_final
+      # 输出消息
+      - output:
+          source: message
+
+  # 收集OpenTelemetry Collector输出的日志
+  - job_name: otel_logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: otel_logs
+          service: otel-collector
+          __path__: /tmp/otel-logs.json
+
+    pipeline_stages:
+      # 解析OpenTelemetry日志格式
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: severity_text
+            message: body
+            service_name: resource.service.name
+            trace_id: trace_id
+            span_id: span_id
+            attributes: attributes
+      # 设置时间戳
+      - timestamp:
+          format: RFC3339Nano
+          source: timestamp
+      # 添加标签
+      - labels:
+          level:
+          service_name:
+      # 输出消息
+      - output:
+          source: message
+
+  # 收集系统日志
+  - job_name: syslog
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: syslog
+          __path__: /var/log/*log
+
+  # 收集Nginx访问日志（如果有的话）
+  - job_name: nginx_access
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: nginx_access
+          __path__: /var/log/nginx/access.log
+
+    pipeline_stages:
+      # 解析Nginx访问日志格式
+      - regex:
+          expression: '^(?P<remote_addr>\S+) - (?P<remote_user>\S+) \[(?P<time_local>[^\]]+)\] "(?P<method>\S+) (?P<request_uri>\S+) (?P<protocol>\S+)" (?P<status>\d+) (?P<body_bytes_sent>\d+) "(?P<http_referer>[^"]*)" "(?P<http_user_agent>[^"]*)"'
+      - timestamp:
+          format: 02/Jan/2006:15:04:05 -0700
+          source: time_local
+      - labels:
+          method:
+          status:
+
+  # 收集应用错误日志
+  - job_name: app_errors
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: app_errors
+          __path__: /app/logs/error*.log

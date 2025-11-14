@@ -1,0 +1,1 @@
+{"timestamp": "2025-11-14T10:04:12.394935", "level": "info", "message": "测试日志消息", "service_name": "fastapi-demo", "endpoint": "/test", "trace_id": "abc123def456789", "span_id": "123456789"}
