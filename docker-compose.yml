@@ -66,6 +66,7 @@ services:
   grafana:
     image: grafana/grafana:10.1.0
     container_name: grafana
+    user: "472:472"
     ports:
       - "3100:3000"
     volumes:
@@ -73,10 +74,11 @@ services:
       - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
       - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
       - ./config/grafana/dashboard-configs:/var/lib/grafana/dashboards
+    tmpfs:
+      - /tmp:mode=1777
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin123
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_INSTALL_PLUGINS=grafana-piechart-panel
     networks:
       - logging
     depends_on:
